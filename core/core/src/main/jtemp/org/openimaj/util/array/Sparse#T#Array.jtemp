@@ -1,0 +1,547 @@
+package org.openimaj.util.array;
+
+import gnu.trove.iterator.TIntIterator;
+import gnu.trove.set.hash.TIntHashSet;
+
+import java.io.DataInput;
+import java.io.DataOutput;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.util.Iterator;
+import java.util.Scanner;
+
+import org.openimaj.io.ReadWriteable;
+
+/**
+ * A sparse array of double values. Includes some elementary
+ * vector operations (add, subtract, scalar multiply, dot product).
+ * 
+ * @author Jonathon Hare (jsh2@ecs.soton.ac.uk)
+ *
+ */
+public abstract class Sparse#T#Array implements ReadWriteable {
+	protected static final int DEFAULT_CAPACITY = 10;
+	
+	/**
+	 * An entry in a {@link SparseDoubleArray}, consisting of
+	 * an index and value.
+	 * 
+	 * @author Jonathon Hare (jsh2@ecs.soton.ac.uk)
+	 */
+	public static class Entry {
+		/**
+		 * The index in the array of the value
+		 */
+		public int index;
+		
+		/**
+		 * The value of the array at the index 
+		 */
+		public #t# value;
+	}
+	
+	/**
+	 * An entry representing the values in two parallel {@link SparseDoubleArray}s
+	 * at the same index.
+	 * 
+	 * @author Jonathon Hare (jsh2@ecs.soton.ac.uk)
+	 */
+	public static class DualEntry extends Entry {		
+		/**
+		 * The value of the other array at the index 
+		 */
+		public #t# otherValue;
+	}
+	
+	/**
+	 * The length of the array 
+	 */
+	public int length;
+	
+	/**
+	 * Increment the value at the given index.
+	 * 
+	 * @param index the index
+	 * @param value the amount to increment by.
+	 * @return the new value 
+	 */
+	public abstract #t# increment(int index, #t# value);
+
+	/**
+	 * @return the indices of the non-zero valued entries of the array.
+	 */
+	public abstract int[] indices();
+	
+	/**
+	 * @return the packed non-zero valued entries of the array.
+	 */
+	public abstract #t#[] values();
+
+	/**
+	 * Provide an iterator over the non-zero values.
+	 * <p>
+	 * Note: the {@link Entry} returned by the iterator
+	 * is always the same object. In addition, the iterator
+	 * cannot affect the value of anything in the array (i.e.
+	 * changing anything in the {@link Entry} has no effect
+	 * on the actual array).
+	 * 
+	 * @return an iterator over the non-zero values.
+	 */
+	public abstract Iterable<Entry> entries();
+	
+	/**
+	 * Provide an iterator over the union of values present in
+	 * both this array and another array. Values where
+	 * both arrays are zero are skipped.
+	 * <p>
+	 * Note: the {@link DualEntry} returned by the iterator
+	 * is always the same object. In addition, the iterator
+	 * cannot affect the value of anything in the array (i.e.
+	 * changing anything in the {@link DualEntry} has no effect
+	 * on the actual array).
+	 * 
+	 * @param otherArray the second array 
+	 * 
+	 * @return an iterator over the non-zero values.
+	 */
+	public Iterable<DualEntry> unionEntries(final Sparse#T#Array otherArray) {
+		//Naive implementation: creates the union of the indices and fetches from
+		//them. Subclasses should override for efficiency.
+		return new Iterable<DualEntry>() {
+			@Override
+			public Iterator<DualEntry> iterator() {
+				final TIntHashSet keys = new TIntHashSet(Sparse#T#Array.this.indices());
+				keys.addAll(otherArray.indices());
+				
+				return new Iterator<DualEntry>() {
+					DualEntry entry = new DualEntry();
+					TIntIterator iterator = keys.iterator();
+					
+					@Override
+					public boolean hasNext() {
+						return iterator.hasNext();
+					}
+
+					@Override
+					public DualEntry next() {
+						entry.index = iterator.next();
+						entry.value = Sparse#T#Array.this.get(entry.index);
+						entry.otherValue = otherArray.get(entry.index);
+						return entry;
+					}
+
+					@Override
+					public void remove() {
+						throw new UnsupportedOperationException();
+					}
+				};
+			}
+		};
+	}
+	
+	/**
+	 * Provide an iterator over the intersection of values present in
+	 * both this array and another array. Values are only
+	 * presented for the cases where both arrays are non-zero.
+	 * <p>
+	 * Note: the {@link DualEntry} returned by the iterator
+	 * is always the same object. In addition, the iterator
+	 * cannot affect the value of anything in the array (i.e.
+	 * changing anything in the {@link DualEntry} has no effect
+	 * on the actual array).
+	 * 
+	 * @param otherArray the second array
+	 * 
+	 * @return an iterator over the non-zero values.
+	 */
+	public Iterable<DualEntry> intersectEntries(final Sparse#T#Array otherArray) {
+		//Naive implementation: creates the intersection of the indices and fetches from
+		//them. Subclasses should override for efficiency.
+		return new Iterable<DualEntry>() {
+			@Override
+			public Iterator<DualEntry> iterator() {
+				final TIntHashSet keys;
+				
+				if (used() < otherArray.used()) {
+					keys = new TIntHashSet(Sparse#T#Array.this.indices());
+					keys.retainAll(otherArray.indices());
+				} else {
+					keys = new TIntHashSet(otherArray.indices());
+					keys.retainAll(Sparse#T#Array.this.indices());
+				}
+
+				return new Iterator<DualEntry>() {
+					DualEntry entry = new DualEntry();
+					TIntIterator iterator = keys.iterator();
+
+					@Override
+					public boolean hasNext() {
+						return iterator.hasNext();
+					}
+
+					@Override
+					public DualEntry next() {
+						entry.index = iterator.next();
+						entry.value = Sparse#T#Array.this.get(entry.index);
+						entry.otherValue = otherArray.get(entry.index);
+						return entry;
+					}
+
+					@Override
+					public void remove() {
+						throw new UnsupportedOperationException();
+					}
+				};
+			}
+		};
+	}
+	
+	/**
+	 * Get the value at the given index.
+	 * @param index the index
+	 * @return the value at the index.
+	 */
+	public abstract #t# get(int index);
+
+	/**
+	 * Check whether the given index is used (i.e. has a non-zero value)
+	 * @param index the index
+	 * @return true if not used; false otherwise.
+	 */
+	public abstract boolean isUsed(int index);
+
+	/**
+	 * Set the value at the given index.
+	 * 
+	 * @param index the index.
+	 * @param value the value to set.
+	 * @return the value
+	 */
+	public abstract #t# set(int index, #t# value);
+
+	/**
+	 * Set the length of the array. Arrays can only be
+	 * extended with this method.
+	 * @param newLength the new array length
+	 * @throws IllegalArgumentException if the new length is shorter than 
+	 * 		the existing length.
+	 */
+	public void setLength(int newLength) {
+		if (newLength < this.length) throw new IllegalArgumentException("can't make sparse array shorter");
+		this.length = newLength;
+	}
+
+	/**
+	 * @return the length of the array
+	 */
+	public int size() {
+		return length;
+	}
+	
+	/**
+	 * @return the length of the array
+	 */
+	public int length() {
+		return length;
+	}
+
+	/**
+	 * @return the number of non-zero entries in the array
+	 */
+	public abstract int used();
+	
+	/**
+	 * @return the density of the array (number of used elements divided
+	 * by array length)
+	 */
+	public float density() {
+		return (float)used() / (float)length; 
+	}
+	
+	/**
+	 * Compact the space being used by the array if possible.
+	 */
+	public abstract void compact();
+	
+	/* (non-Javadoc)
+	 * @see org.openimaj.io.WriteableASCII#writeASCII(java.io.PrintWriter)
+	 */
+	@Override
+	public void writeASCII(PrintWriter out) throws IOException {
+		out.print(this.length);
+		out.print(" ");
+		
+		for (Entry e : entries()) {
+			out.print(e.index + ":" + e.value + " ");			
+		}
+	}
+
+	/* (non-Javadoc)
+	 * @see org.openimaj.io.ReadableASCII#readASCII(java.util.Scanner)
+	 */
+	@Override
+	public void readASCII(Scanner in) throws IOException {
+		this.length = in.nextInt();
+		
+		String[] parts = in.nextLine().split(" ");
+		for (String part : parts) {
+			String[] bits = part.split(":");
+			
+			set(Integer.parseInt(bits[0]), #TT#.parse#T#(bits[1]));
+		}
+	}
+
+	/* (non-Javadoc)
+	 * @see org.openimaj.io.ReadableASCII#asciiHeader()
+	 */
+	@Override
+	public String asciiHeader() {
+		return "Sp#T#A";
+	}
+
+	/* (non-Javadoc)
+	 * @see org.openimaj.io.WriteableBinary#writeBinary(java.io.DataOutput)
+	 */
+	@Override
+	public void writeBinary(DataOutput out) throws IOException {
+		out.writeInt(this.length);
+		out.writeInt(this.used());
+		for (Entry e : entries()) {
+			out.writeInt(e.index);
+			out.write#T#(e.value);			
+		}
+	}
+
+	/* (non-Javadoc)
+	 * @see org.openimaj.io.ReadableBinary#readBinary(java.io.DataInput)
+	 */
+	@Override
+	public void readBinary(DataInput in) throws IOException {
+		this.length = in.readInt();
+		int used = in.readInt();
+		for (int i=0; i<used; i++) {
+			set(in.readInt(), in.read#T#());
+		}
+	}
+
+	/* (non-Javadoc)
+	 * @see org.openimaj.io.ReadableBinary#binaryHeader()
+	 */
+	@Override
+	public byte[] binaryHeader() {
+		return "Sp#T#A".getBytes();
+	}
+	
+	/**
+	 * Deep copy the array.
+	 * @return a deep copy of the array
+	 */
+	public abstract Sparse#T#Array copy();
+
+	/**
+	 * Add the values in the given vector to a copy of
+	 * this array and return the result
+	 * @param vector the vector to add
+	 * @return the resultant vector
+	 */
+	public Sparse#T#Array add(Sparse#T#Array vector) {
+		return copy().addInplace(vector);
+	}
+
+	/**
+	 * Add the values in the given vector to
+	 * this vector and return this
+	 * @param vector the vector to add
+	 * @return this
+	 */
+	public Sparse#T#Array addInplace(Sparse#T#Array vector) {
+		for (Entry e : entries()) {
+			increment(e.index, e.value);
+		}
+
+		return this;
+	}
+
+	/**
+	 * Subtract the values in the given vector from a copy of
+	 * this vector and return the result
+	 * @param vector the array to add
+	 * @return the resultant vector
+	 */
+	public Sparse#T#Array subtract(Sparse#T#Array vector) {
+		return copy().subtractInplace(vector);
+	}
+
+	/**
+	 * Subtract the values in the given vector from
+	 * this array and return this
+	 * @param vector the vector to add
+	 * @return this
+	 */
+	public Sparse#T#Array subtractInplace(Sparse#T#Array vector) {
+		for (Entry e : entries()) {
+			increment(e.index, (#t#)(-e.value));
+		}
+
+		return this;
+	}
+
+	/**
+	 * Copy this vector and multiply its values by a 
+	 * scalar
+	 * @param value scalar multiplier
+	 * @return the multiplied vector 
+	 */
+	public Sparse#T#Array multiply(double value) {
+		return copy().multiplyInplace(value);
+	}
+
+	/**
+	 * Multiply the values inplace by a scalar and return this
+	 * @param value scalar multiplier
+	 * @return this
+	 */
+	public Sparse#T#Array multiplyInplace(double value) {
+		for (Entry e : entries()) {
+			if (this.isUsed(e.index))
+				set(e.index, (#t#)(get(e.index) * e.value));
+		}
+
+		return this;
+	}
+
+	/**
+	 * Compute the dot product with another vector
+	 * @param vector the other vector
+	 * @return the dot product
+	 */
+	public double dotProduct(Sparse#T#Array vector) {
+		double sum = 0;
+
+		int tused = this.used();
+		int vused = vector.used();
+
+		Sparse#T#Array smaller = (tused < vused ? this : vector);
+		Sparse#T#Array larger = (tused < vused ? vector : this);
+
+		for (Entry e : smaller.entries()) {
+			sum += e.value * larger.get(e.index);
+		}
+
+		return sum;
+	}
+	
+	/**
+	 * @return the largest value in the array
+	 */
+	public #t# maxValue() {
+		#t# max = -#TT#.MAX_VALUE;
+
+		for (Entry e : entries()) {
+			if (e.value > max) max = e.value;
+		}
+
+		return max;
+	}
+
+	/**
+	 * @return the smallest value in the array
+	 */
+	public #t# minValue() {
+		#t# min = #TT#.MAX_VALUE;
+
+		for (Entry e : entries()) {
+			if (e.value < min) min = e.value;
+		}
+
+		return min;
+	}
+
+	/**
+	 * @return the index of the largest value in the array
+	 */
+	public int maxIndex() {
+		#t# max = -#TT#.MAX_VALUE;
+		int index = 0;
+
+		for (Entry e : entries()) {
+			if (e.value > max) { 
+				max = e.value;
+				index = e.index;
+			}
+		}
+
+		return index;
+	}
+
+	/**
+	 * @return the index of the smallest value in the array
+	 */
+	public int minIndex() {
+		#t# min = #TT#.MAX_VALUE;
+		int index = 0;
+
+		for (Entry e : entries()) {
+			if (e.value < min) {
+				min = e.value;
+				index = e.index;
+			}
+		}
+
+		return index;
+	}
+
+	/**
+	 * Reverse the elements, returning this.
+	 * 
+	 * @return this array
+	 */
+	public abstract Sparse#T#Array reverse();
+
+	/**
+	 * Concatenate multiple arrays into a single new array.
+	 * 
+	 * @param arrays the arrays to concatenate.
+	 * @return the new concatenated array
+	 */
+	public static Sparse#T#Array concatenate(Sparse#T#Array... arrays) {
+		Sparse#T#Array concat = arrays[0].copy();
+
+		for (int i=1; i<arrays.length; i++) {
+			if (arrays[i] != null) {
+				int oldLength = concat.length;
+				concat.setLength(oldLength + arrays[i].length);
+
+				for (Entry e : arrays[i].entries())
+					concat.set(e.index + oldLength, e.value);
+			}
+		}
+
+        return concat;
+	}
+
+	/**
+	 * Compute the sum of values
+	 * @return the sum of all values
+	 */
+	public #t# sumValues() {
+		#t# sum = 0;
+
+		for (Entry e : entries()) sum += e.value;
+
+		return sum;
+	}
+
+	/**
+	 * Compute the sum of values squared
+	 * @return the sum of all values
+	 */
+	public #t# sumValuesSquared() {
+		#t# sum = 0;
+
+		for (Entry e : entries()) sum += e.value * e.value;
+
+		return sum;
+	}
+}
